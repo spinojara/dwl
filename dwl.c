@@ -289,6 +289,7 @@ static void focusmon(const Arg *arg);
 static void focusstack(const Arg *arg);
 static int gettag(const Monitor *m);
 static Client *focustop(Monitor *m);
+static Client *tiletop(Monitor *m);
 static void fullscreennotify(struct wl_listener *listener, void *data);
 static void gpureset(struct wl_listener *listener, void *data);
 static void handlesig(int signo);
@@ -1490,9 +1491,43 @@ void
 focusstack(const Arg *arg)
 {
 	/* Focus the next or previous client (in tiling order) on selmon */
-	Client *c, *sel = focustop(selmon);
+	Client *c, *sel = focustop(selmon), *tile = tiletop(selmon);
+	int n = 0, total = 0, j = -1, i, tag;
+
 	if (!sel || (sel->isfullscreen && !client_has_children(sel)))
 		return;
+
+	wl_list_for_each(c, &clients, link) {
+		if (&c->link == &sel->link)
+			break;
+		if (VISIBLEON(c, selmon))
+			n++;
+	}
+
+	wl_list_for_each(c, &clients, link) {
+		if (VISIBLEON(c, selmon))
+			total++;
+	}
+
+	tag = gettag(selmon);
+	if (arg->i == 0 && n >= selmon->nmaster[tag] && selmon->nmaster[tag] > 0)
+		for (j = 0; (j + 1) * (total - selmon->nmaster[tag]) <= (n - selmon->nmaster[tag]) * selmon->nmaster[tag]; j++);
+	else if (arg->i == 1 && n + 1 < total && (n >= selmon->nmaster[tag] || n + 1 < selmon->nmaster[tag]))
+		j = n + 1;
+	else if (arg->i == 2 && n - 1 >= 0 && (n < selmon->nmaster[tag] || n - 1 >= selmon->nmaster[tag]))
+		j = n - 1;
+	else if (arg->i == 3 && n < selmon->nmaster[tag] && selmon->nmaster[tag] < total)
+		for (j = selmon->nmaster[tag]; (j - selmon->nmaster[tag] + 1) * selmon->nmaster[tag] <= n * (total - selmon->nmaster[tag]); j++);
+
+	c = NULL;
+	i = 0;
+	if (j > -1) {
+		wl_list_for_each(c, &clients, link) {
+			if (VISIBLEON(c, selmon) && ++i > j)
+				break;
+		}
+	}
+#if 0
 	if (arg->i > 0) {
 		wl_list_for_each(c, &sel->link, link) {
 			if (&c->link == &clients)
@@ -1508,8 +1543,9 @@ focusstack(const Arg *arg)
 				break; /* found it */
 		}
 	}
-	/* If only one client is visible on selmon, then c == sel */
-	focusclient(c, 1);
+#endif
+	if (i == j + 1 && c && VISIBLEON(c, selmon))
+		focusclient(c, 1);
 }
 
 int gettag(const Monitor *m) {
@@ -1524,6 +1560,17 @@ focustop(Monitor *m)
 {
 	Client *c;
 	wl_list_for_each(c, &fstack, flink) {
+		if (VISIBLEON(c, m))
+			return c;
+	}
+	return NULL;
+}
+
+Client *
+tiletop(Monitor *m)
+{
+	Client *c;
+	wl_list_for_each(c, &clients, link) {
 		if (VISIBLEON(c, m))
 			return c;
 	}
