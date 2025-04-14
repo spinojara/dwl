@@ -110,25 +110,27 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
 /* If you want to use the windows key for MODKEY, use WLR_MODIFIER_LOGO */
 #define MODKEY WLR_MODIFIER_ALT
 
-#define TAGKEYS(KEY,SKEY,TAG) \
-	{ MODKEY,                    KEY,            view,            {.ui = 1 << TAG} }, \
-	{ MODKEY|WLR_MODIFIER_CTRL,  KEY,            toggleview,      {.ui = 1 << TAG} }, \
-	{ MODKEY|WLR_MODIFIER_SHIFT, SKEY,           tag,             {.ui = 1 << TAG} }, \
+#if 0
+	{ MODKEY|WLR_MODIFIER_CTRL,  KEY,            toggleview,      {.ui = 1 << TAG} }
 	{ MODKEY|WLR_MODIFIER_CTRL|WLR_MODIFIER_SHIFT,SKEY,toggletag, {.ui = 1 << TAG} }
+#endif
+#define TAGKEYS(KEY,SKEY,TAG) \
+	{ MODKEY,                     KEY,            view,            {.ui = 1 << TAG} }, \
+	{ MODKEY|WLR_MODIFIER_SHIFT, SKEY,            tag,             {.ui = 1 << TAG} }
 
 /* helper for spawning shell commands in the pre dwm-5.0 fashion */
 #define SHCMD(cmd) { .v = (const char*[]){ "/bin/sh", "-c", cmd, NULL } }
 
 /* commands */
 static const char *termcmd[] = { "foot", NULL };
-static const char *menucmd[] = { "wmenu-run", NULL };
+static const char *menucmd[] = { "bemenu-run", NULL };
 static const char *shutdown[] = { "loginctl", "poweroff", NULL };
 static const char *reboot[] = { "loginctl", "reboot", NULL };
 
 static const Key keys[] = {
 	/* Note that Shift changes certain key codes: c -> C, 2 -> at, etc. */
 	/* modifier                  key                 function        argument */
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_d,          spawn,          {.v = menucmd} },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_D,          spawn,          {.v = menucmd} },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_Return,     spawn,          {.v = termcmd} },
 	//{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_b,          togglebar,      {0} },
 	{ MODKEY,                    XKB_KEY_h,          focusstack,     {.i = 0} },
@@ -140,7 +142,7 @@ static const Key keys[] = {
 	{ MODKEY,                    XKB_KEY_n,          setmfact,       {.f = -0.05f} },
 	{ MODKEY,                    XKB_KEY_m,          setmfact,       {.f = +0.05f} },
 	{ MODKEY,                    XKB_KEY_Return,     zoom,           {0} },
-	//{ MODKEY,                    XKB_KEY_Tab,        view,           {0} },
+	{ MODKEY,                    XKB_KEY_Tab,        view,           {0} },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_C,          killclient,     {0} },
 	//{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_space,      togglefloating, {0} },
 	//{ MODKEY,                    XKB_KEY_e,          togglefullscreen, {0} },
@@ -150,18 +152,19 @@ static const Key keys[] = {
 	//{ MODKEY,                    XKB_KEY_period,     focusmon,       {.i = WLR_DIRECTION_RIGHT} },
 	//{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_less,       tagmon,         {.i = WLR_DIRECTION_LEFT} },
 	//{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_greater,    tagmon,         {.i = WLR_DIRECTION_RIGHT} },
-	TAGKEYS(          XKB_KEY_1, XKB_KEY_exclam,                     0),
-	TAGKEYS(          XKB_KEY_2, XKB_KEY_at,                         1),
-	TAGKEYS(          XKB_KEY_3, XKB_KEY_numbersign,                 2),
-	TAGKEYS(          XKB_KEY_4, XKB_KEY_dollar,                     3),
-	TAGKEYS(          XKB_KEY_5, XKB_KEY_percent,                    4),
-	TAGKEYS(          XKB_KEY_6, XKB_KEY_asciicircum,                5),
-	TAGKEYS(          XKB_KEY_7, XKB_KEY_ampersand,                  6),
-	TAGKEYS(          XKB_KEY_8, XKB_KEY_asterisk,                   7),
-	TAGKEYS(          XKB_KEY_9, XKB_KEY_parenleft,                  8),
+	/* Weird with different layout. Why wayland? */
+	TAGKEYS(          XKB_KEY_1, XKB_KEY_exclam,     0),
+	TAGKEYS(          XKB_KEY_2, XKB_KEY_quotedbl,   1),
+	TAGKEYS(          XKB_KEY_3, XKB_KEY_numbersign, 2),
+	TAGKEYS(          XKB_KEY_4, XKB_KEY_currency,   3),
+	TAGKEYS(          XKB_KEY_5, XKB_KEY_percent,    4),
+	TAGKEYS(          XKB_KEY_6, XKB_KEY_ampersand,  5),
+	TAGKEYS(          XKB_KEY_7, XKB_KEY_slash,      6),
+	TAGKEYS(          XKB_KEY_8, XKB_KEY_parenleft,  7),
+	TAGKEYS(          XKB_KEY_9, XKB_KEY_parenright, 8),
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_Q,          quit,           {0} },
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_S,          spawn,          {.v = shutdown } },
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_r,          spawn,          {.v = reboot } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_R,          spawn,          {.v = reboot } },
 
 	/* Ctrl-Alt-Backspace and Ctrl-Alt-Fx used to be handled by X server */
 	{ WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT,XKB_KEY_Terminate_Server, quit, {0} },
