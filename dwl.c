@@ -178,11 +178,6 @@ typedef struct {
 	struct wl_listener surface_commit;
 } LayerSurface;
 
-typedef struct {
-	const char *symbol;
-	void (*arrange)(Monitor *);
-} Layout;
-
 #define TAGCOUNT (9)
 
 struct Monitor {
@@ -198,14 +193,11 @@ struct Monitor {
 	struct wlr_box m; /* monitor area, layout-relative */
 	struct wlr_box w; /* window area, layout-relative */
 	struct wl_list layers[4]; /* LayerSurface.link */
-	const Layout *lt[2];
 	unsigned int seltags;
-	unsigned int sellt;
 	uint32_t tagset[2];
 	float mfact[TAGCOUNT];
 	int gamma_lut_changed;
 	int nmaster[TAGCOUNT];
-	char ltsymbol[16];
 	int asleep;
 };
 
@@ -214,7 +206,6 @@ typedef struct {
 	float mfact;
 	int nmaster;
 	float scale;
-	const Layout *lt;
 	enum wl_output_transform rr;
 	int x, y;
 } MonitorRule;
@@ -303,7 +294,6 @@ static void killclient(const Arg *arg);
 static void locksession(struct wl_listener *listener, void *data);
 static void mapnotify(struct wl_listener *listener, void *data);
 static void maximizenotify(struct wl_listener *listener, void *data);
-static void monocle(Monitor *m);
 static void motionabsolute(struct wl_listener *listener, void *data);
 static void motionnotify(uint32_t time, struct wlr_input_device *device, double sx,
 		double sy, double sx_unaccel, double sy_unaccel);
@@ -523,24 +513,16 @@ arrange(Monitor *m)
 	wlr_scene_node_set_enabled(&m->fullscreen_bg->node,
 			(c = focustop(m)) && c->isfullscreen);
 
-	strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, LENGTH(m->ltsymbol));
-
 	/* We move all clients (except fullscreen and unmanaged) to LyrTile while
 	 * in floating layout to avoid "real" floating clients be always on top */
 	wl_list_for_each(c, &clients, link) {
 		if (c->mon != m || c->scene->node.parent == layers[LyrFS])
 			continue;
 
-		wlr_scene_node_reparent(&c->scene->node,
-				(!m->lt[m->sellt]->arrange && c->isfloating)
-						? layers[LyrTile]
-						: (m->lt[m->sellt]->arrange && c->isfloating)
-								? layers[LyrFloat]
-								: c->scene->node.parent);
+		wlr_scene_node_reparent(&c->scene->node, c->isfloating ? layers[LyrFloat] : c->scene->node.parent);
 	}
 
-	if (m->lt[m->sellt]->arrange)
-		m->lt[m->sellt]->arrange(m);
+	tile(m);
 	motionnotify(0, NULL, 0, 0, 0, 0);
 	checkidleinhibitor(NULL);
 }
@@ -1066,9 +1048,6 @@ createmon(struct wl_listener *listener, void *data)
 				m->mfact[tag] = r->mfact;
 				m->nmaster[tag] = r->nmaster;
 			}
-			m->lt[0] = r->lt;
-			m->lt[1] = &layouts[LENGTH(layouts) > 1 && r->lt != &layouts[1]];
-			strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, LENGTH(m->ltsymbol));
 			wlr_output_state_set_scale(&state, r->scale);
 			wlr_output_state_set_transform(&state, r->rr);
 			break;
@@ -1874,24 +1853,6 @@ maximizenotify(struct wl_listener *listener, void *data)
 }
 
 void
-monocle(Monitor *m)
-{
-	Client *c;
-	int n = 0;
-
-	wl_list_for_each(c, &clients, link) {
-		if (!VISIBLEON(c, m) || c->isfloating || c->isfullscreen)
-			continue;
-		resize(c, m->w, 0);
-		n++;
-	}
-	if (n)
-		snprintf(m->ltsymbol, LENGTH(m->ltsymbol), "[%d]", n);
-	if ((c = focustop(m)))
-		wlr_scene_node_raise_to_top(&c->scene->node);
-}
-
-void
 motionabsolute(struct wl_listener *listener, void *data)
 {
 	/* This event is forwarded by the cursor when a pointer emits an _absolute_
@@ -2172,7 +2133,6 @@ printstatus(void)
 		printf("%s selmon %u\n", m->wlr_output->name, m == selmon);
 		printf("%s tags %"PRIu32" %"PRIu32" %"PRIu32" %"PRIu32"\n",
 			m->wlr_output->name, occ, m->tagset[m->seltags], sel, urg);
-		printf("%s layout %s\n", m->wlr_output->name, m->ltsymbol);
 	}
 	fflush(stdout);
 }
@@ -2388,7 +2348,7 @@ setfloating(Client *c, int floating)
 	Client *p = client_get_parent(c);
 	c->isfloating = floating;
 	/* If in floating layout do not change the client's layer */
-	if (!c->mon || !client_surface(c)->mapped || !c->mon->lt[c->mon->sellt]->arrange)
+	if (!c->mon || !client_surface(c)->mapped)
 		return;
 	wlr_scene_node_reparent(&c->scene->node, layers[c->isfullscreen ||
 			(p && p->isfullscreen) ? LyrFS
@@ -2427,7 +2387,7 @@ setmfact(const Arg *arg)
 	float f;
 	int tag;
 
-	if (!arg || !selmon || !selmon->lt[selmon->sellt]->arrange)
+	if (!arg || !selmon)
 		return;
 	tag = gettag(selmon);
 	f = arg->f < 1.0f ? arg->f + selmon->mfact[tag] : arg->f - 1.0f;
@@ -3090,7 +3050,7 @@ zoom(const Arg *arg)
 {
 	Client *c, *sel = focustop(selmon);
 
-	if (!sel || !selmon || !selmon->lt[selmon->sellt]->arrange || sel->isfloating)
+	if (!sel || !selmon || sel->isfloating)
 		return;
 
 	/* Search for the first tiled window that is not sel, marking sel as
@@ -3154,7 +3114,7 @@ configurex11(struct wl_listener *listener, void *data)
 				event->x, event->y, event->width, event->height);
 		return;
 	}
-	if ((c->isfloating && c != grabc) || !c->mon->lt[c->mon->sellt]->arrange) {
+	if (c->isfloating && c != grabc) {
 		resize(c, (struct wlr_box){.x = event->x - c->bw,
 				.y = event->y - c->bw, .width = event->width + c->bw * 2,
 				.height = event->height + c->bw * 2}, 0);

@@ -28,14 +28,6 @@ static const Rule rules[] = {
 	{ "firefox_EXAMPLE",  NULL,       1 << 8,       0,           -1 }, /* Start on ONLY tag "9" */
 };
 
-/* layout(s) */
-static const Layout layouts[] = {
-	/* symbol     arrange function */
-	{ "[]=",      tile },
-	{ "><>",      NULL },    /* no layout function means floating behavior */
-	{ "[M]",      monocle },
-};
-
 /* monitors */
 /* (x=-1, y=-1) is reserved as an "autoconfigure" monitor position indicator
  * WARNING: negative values other than (-1, -1) cause problems with Xwayland clients
@@ -47,8 +39,9 @@ static const MonitorRule monrules[] = {
 	/* example of a HiDPI laptop monitor:
 	{ "eDP-1",    0.5f,  1,      2,    &layouts[0], WL_OUTPUT_TRANSFORM_NORMAL,   -1,  -1 },
 	*/
+	/* name       mfact  nmaster scale rotate/reflect                x    y */
 	/* defaults */
-	{ NULL,       0.55f, 1,      1,    &layouts[0], WL_OUTPUT_TRANSFORM_NORMAL,   -1,  -1 },
+	{ NULL,       0.55f, 1,      1,    WL_OUTPUT_TRANSFORM_NORMAL,   -1,  -1 },
 };
 
 /* keyboard */
