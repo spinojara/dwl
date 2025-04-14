@@ -306,6 +306,8 @@ static void destroypointerconstraint(struct wl_listener *listener, void *data);
 static void destroysessionlock(struct wl_listener *listener, void *data);
 static void destroykeyboardgroup(struct wl_listener *listener, void *data);
 static Monitor *dirtomon(enum wlr_direction dir);
+static void backlight(const Arg *arg);
+static void kbd_backlight(const Arg *arg);
 static void drawbar(Monitor *m);
 static void drawbars(void);
 static void focusclient(Client *c, int lift);
@@ -1549,6 +1551,54 @@ dirtomon(enum wlr_direction dir)
 			selmon->wlr_output, selmon->m.x, selmon->m.y)))
 		return next->data;
 	return selmon;
+}
+
+void
+backlight(const Arg *arg) {
+	FILE *file;
+	char line[BUFSIZ], *endptr = NULL;
+	long long brightness;
+
+	file = fopen("/sys/class/backlight/amdgpu_bl0/brightness", "w+");
+	if (!file || !fgets(line, sizeof(line), file))
+		return;
+
+	errno = 0;
+	brightness = strtoll(line, &endptr, 10);
+	if (errno || *endptr != '\n')
+		return;
+
+	brightness += arg->i * 16;
+	if (brightness < 0)
+		brightness = 0;
+	if (brightness > 255)
+		brightness = 255;
+
+	fprintf(file, "%lld\n", brightness);
+	fclose(file);
+}
+
+void
+kbd_backlight(const Arg *arg) {
+	(void)arg;
+
+	FILE *file;
+	char line[BUFSIZ], *endptr = NULL;
+	long long brightness;
+
+	file = fopen("/sys/class/leds/asus::kbd_backlight/brightness", "w+");
+	if (!file || !fgets(line, sizeof(line), file))
+		return;
+
+	errno = 0;
+	brightness = strtoll(line, &endptr, 10);
+	if (errno || *endptr != '\n')
+		return;
+
+	brightness = (brightness + 1) % 4;
+
+	fprintf(file, "%lld\n", brightness);
+	fclose(file);
 }
 
 void

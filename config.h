@@ -123,9 +123,12 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
 
 /* commands */
 static const char *termcmd[] = { "foot", NULL };
-static const char *menucmd[] = { "bemenu-run", NULL };
+static const char *menucmd[] = { "wmenu-run", "-b", "-i", "-f", "Mx437 IBM VGA 8x16 12", NULL };
 static const char *shutdown[] = { "loginctl", "poweroff", NULL };
 static const char *reboot[] = { "loginctl", "reboot", NULL };
+static const char *audiomute[] = { "wpctl", "set-mute", "@DEFAULT_SINK@", "toggle", NULL };
+static const char *audioraise[] = { "wpctl", "set-volume", "@DEFAULT_SINK@", "5%+", NULL };
+static const char *audiolower[] = { "wpctl", "set-volume", "@DEFAULT_SINK@", "5%-", NULL };
 
 static const Key keys[] = {
 	/* Note that Shift changes certain key codes: c -> C, 2 -> at, etc. */
@@ -163,8 +166,14 @@ static const Key keys[] = {
 	TAGKEYS(          XKB_KEY_8, XKB_KEY_parenleft,  7),
 	TAGKEYS(          XKB_KEY_9, XKB_KEY_parenright, 8),
 	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_Q,          quit,           {0} },
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_S,          spawn,          {.v = shutdown } },
-	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_R,          spawn,          {.v = reboot } },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_S,          spawn,          {.v = shutdown} },
+	{ MODKEY|WLR_MODIFIER_SHIFT, XKB_KEY_R,          spawn,          {.v = reboot} },
+	{ 0,                         XKB_KEY_F1,         spawn,          {.v = audiomute} },
+	{ 0,                         XKB_KEY_F2,         spawn,          {.v = audiolower} },
+	{ 0,                         XKB_KEY_F3,         spawn,          {.v = audioraise} },
+	{ 0,                         XKB_KEY_F4,         backlight,      {.i = -1} },
+	{ 0,                         XKB_KEY_F5,         backlight,      {.i = +1} },
+	{ 0,                         XKB_KEY_F7,         kbd_backlight,  {0} },
 
 	/* Ctrl-Alt-Backspace and Ctrl-Alt-Fx used to be handled by X server */
 	{ WLR_MODIFIER_CTRL|WLR_MODIFIER_ALT,XKB_KEY_Terminate_Server, quit, {0} },
