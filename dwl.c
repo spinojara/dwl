@@ -311,7 +311,7 @@ static void kbd_backlight(const Arg *arg);
 static void drawbar(Monitor *m);
 static void drawbars(void);
 static void focusclient(Client *c, int lift);
-static void focusmon(const Arg *arg);
+//static void focusmon(const Arg *arg);
 static void focusstack(const Arg *arg);
 static int gettag(const Monitor *m);
 static Client *focustop(Monitor *m);
@@ -332,7 +332,7 @@ static void motionabsolute(struct wl_listener *listener, void *data);
 static void motionnotify(uint32_t time, struct wlr_input_device *device, double sx,
 		double sy, double sx_unaccel, double sy_unaccel);
 static void motionrelative(struct wl_listener *listener, void *data);
-static void moveresize(const Arg *arg);
+//static void moveresize(const Arg *arg);
 static void outputmgrapply(struct wl_listener *listener, void *data);
 static void outputmgrapplyortest(struct wlr_output_configuration_v1 *config, int test);
 static void outputmgrtest(struct wl_listener *listener, void *data);
@@ -357,15 +357,15 @@ static void setsel(struct wl_listener *listener, void *data);
 static void setup(void);
 static void spawn(const Arg *arg);
 static void startdrag(struct wl_listener *listener, void *data);
-static int statusin(int fd, unsigned int mask, void *data);
+//static int statusin(int fd, unsigned int mask, void *data);
 static void tag(const Arg *arg);
-static void tagmon(const Arg *arg);
+//static void tagmon(const Arg *arg);
 static void tile(Monitor *m);
-static void togglebar(const Arg *arg);
-static void togglefloating(const Arg *arg);
-static void togglefullscreen(const Arg *arg);
-static void toggletag(const Arg *arg);
-static void toggleview(const Arg *arg);
+//static void togglebar(const Arg *arg);
+//static void togglefloating(const Arg *arg);
+//static void togglefullscreen(const Arg *arg);
+//static void toggletag(const Arg *arg);
+//static void toggleview(const Arg *arg);
 static void unlocksession(struct wl_listener *listener, void *data);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
 static void unmapnotify(struct wl_listener *listener, void *data);
@@ -733,13 +733,13 @@ buttonpress(struct wl_listener *listener, void *data)
 	double cx;
 	unsigned int click;
 	struct wlr_pointer_button_event *event = data;
-	struct wlr_keyboard *keyboard;
+	//struct wlr_keyboard *keyboard;
 	struct wlr_scene_node *node;
 	struct wlr_scene_buffer *buffer;
-	uint32_t mods;
-	Arg arg = {0};
+	//uint32_t mods;
+	//Arg arg = {0};
 	Client *c;
-	const Button *b;
+	//const Button *b;
 
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
 
@@ -764,7 +764,7 @@ buttonpress(struct wl_listener *listener, void *data)
 			while (cx >= x && ++i < LENGTH(tags));
 			if (i < LENGTH(tags)) {
 				click = ClkTagBar;
-				arg.ui = 1 << i;
+				//arg.ui = 1 << i;
 			}
 #if 0
 			else if (cx < x + TEXTW(selmon, selmon->ltsymbol))
@@ -781,8 +781,8 @@ buttonpress(struct wl_listener *listener, void *data)
 		if (click == ClkClient && (!client_is_unmanaged(c) || client_wants_focus(c)))
 			focusclient(c, 1);
 
-		keyboard = wlr_seat_get_keyboard(seat);
-		mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
+		//keyboard = wlr_seat_get_keyboard(seat);
+		//mods = keyboard ? wlr_keyboard_get_modifiers(keyboard) : 0;
 #if 0
 		for (b = buttons; b < END(buttons); b++) {
 			if (CLEANMASK(mods) == CLEANMASK(b->mod) && event->button == b->button && click == b->click && b->func) {
@@ -1580,11 +1580,11 @@ backlight(const Arg *arg) {
 
 void
 kbd_backlight(const Arg *arg) {
-	(void)arg;
-
 	FILE *file;
 	char line[BUFSIZ], *endptr = NULL;
 	long long brightness;
+
+	(void)arg;
 
 	file = fopen("/sys/class/leds/asus::kbd_backlight/brightness", "w+");
 	if (!file || !fgets(line, sizeof(line), file))
