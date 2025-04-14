@@ -183,6 +183,8 @@ typedef struct {
 	void (*arrange)(Monitor *);
 } Layout;
 
+#define TAGCOUNT (9)
+
 struct Monitor {
 	struct wl_list link;
 	struct wlr_output *wlr_output;
@@ -200,9 +202,9 @@ struct Monitor {
 	unsigned int seltags;
 	unsigned int sellt;
 	uint32_t tagset[2];
-	float mfact;
+	float mfact[TAGCOUNT];
 	int gamma_lut_changed;
-	int nmaster;
+	int nmaster[TAGCOUNT];
 	char ltsymbol[16];
 	int asleep;
 };
@@ -285,6 +287,7 @@ static Monitor *dirtomon(enum wlr_direction dir);
 static void focusclient(Client *c, int lift);
 static void focusmon(const Arg *arg);
 static void focusstack(const Arg *arg);
+static int gettag(const Monitor *m);
 static Client *focustop(Monitor *m);
 static void fullscreennotify(struct wl_listener *listener, void *data);
 static void gpureset(struct wl_listener *listener, void *data);
@@ -1059,8 +1062,10 @@ createmon(struct wl_listener *listener, void *data)
 		if (!r->name || strstr(wlr_output->name, r->name)) {
 			m->m.x = r->x;
 			m->m.y = r->y;
-			m->mfact = r->mfact;
-			m->nmaster = r->nmaster;
+			for (int tag = 0; tag < TAGCOUNT; tag++) {
+				m->mfact[tag] = r->mfact;
+				m->nmaster[tag] = r->nmaster;
+			}
 			m->lt[0] = r->lt;
 			m->lt[1] = &layouts[LENGTH(layouts) > 1 && r->lt != &layouts[1]];
 			strncpy(m->ltsymbol, m->lt[m->sellt]->symbol, LENGTH(m->ltsymbol));
@@ -1508,6 +1513,10 @@ focusstack(const Arg *arg)
 	focusclient(c, 1);
 }
 
+int gettag(const Monitor *m) {
+	return m->tagset[selmon->seltags] ? __builtin_ctzll(m->tagset[selmon->seltags]) : 0;
+}
+
 /* We probably should change the name of this, it sounds like
  * will focus the topmost client of this mon, when actually will
  * only return that client */
@@ -1566,9 +1575,11 @@ handlesig(int signo)
 void
 incnmaster(const Arg *arg)
 {
+	int tag;
 	if (!arg || !selmon)
 		return;
-	selmon->nmaster = MAX(selmon->nmaster + arg->i, 0);
+	tag = gettag(selmon);
+	selmon->nmaster[tag] = MAX(selmon->nmaster[tag] + arg->i, 0);
 	arrange(selmon);
 }
 
@@ -2382,13 +2393,17 @@ void
 setmfact(const Arg *arg)
 {
 	float f;
+	int tag;
 
 	if (!arg || !selmon || !selmon->lt[selmon->sellt]->arrange)
 		return;
-	f = arg->f < 1.0f ? arg->f + selmon->mfact : arg->f - 1.0f;
-	if (f < 0.1 || f > 0.9)
-		return;
-	selmon->mfact = f;
+	tag = gettag(selmon);
+	f = arg->f < 1.0f ? arg->f + selmon->mfact[tag] : arg->f - 1.0f;
+	if (f < 0.1f)
+		f = 0.1f;
+	if (f > 0.9f)
+		f = 0.9f;
+	selmon->mfact[tag] = f;
 	arrange(selmon);
 }
 
@@ -2708,7 +2723,7 @@ void
 tile(Monitor *m)
 {
 	unsigned int mw, my, ty;
-	int i, n = 0;
+	int i, n = 0, tag;
 	Client *c;
 
 	wl_list_for_each(c, &clients, link)
@@ -2717,17 +2732,18 @@ tile(Monitor *m)
 	if (n == 0)
 		return;
 
-	if (n > m->nmaster)
-		mw = m->nmaster ? (int)roundf(m->w.width * m->mfact) : 0;
+	tag = gettag(m);
+	if (n > m->nmaster[tag])
+		mw = m->nmaster[tag] ? (int)roundf(m->w.width * m->mfact[tag]) : 0;
 	else
 		mw = m->w.width;
 	i = my = ty = 0;
 	wl_list_for_each(c, &clients, link) {
 		if (!VISIBLEON(c, m) || c->isfloating || c->isfullscreen)
 			continue;
-		if (i < m->nmaster) {
+		if (i < m->nmaster[tag]) {
 			resize(c, (struct wlr_box){.x = m->w.x, .y = m->w.y + my, .width = mw,
-				.height = (m->w.height - my) / (MIN(n, m->nmaster) - i)}, 0);
+				.height = (m->w.height - my) / (MIN(n, m->nmaster[tag]) - i)}, 0);
 			my += c->geom.height;
 		} else {
 			resize(c, (struct wlr_box){.x = m->w.x + mw, .y = m->w.y + ty,
