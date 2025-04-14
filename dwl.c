@@ -280,7 +280,6 @@ static void focusmon(const Arg *arg);
 static void focusstack(const Arg *arg);
 static int gettag(const Monitor *m);
 static Client *focustop(Monitor *m);
-static Client *tiletop(Monitor *m);
 static void fullscreennotify(struct wl_listener *listener, void *data);
 static void gpureset(struct wl_listener *listener, void *data);
 static void handlesig(int signo);
@@ -1470,7 +1469,7 @@ void
 focusstack(const Arg *arg)
 {
 	/* Focus the next or previous client (in tiling order) on selmon */
-	Client *c, *sel = focustop(selmon), *tile = tiletop(selmon);
+	Client *c, *sel = focustop(selmon);
 	int n = 0, total = 0, j = -1, i, tag;
 
 	if (!sel || (sel->isfullscreen && !client_has_children(sel)))
@@ -1539,17 +1538,6 @@ focustop(Monitor *m)
 {
 	Client *c;
 	wl_list_for_each(c, &fstack, flink) {
-		if (VISIBLEON(c, m))
-			return c;
-	}
-	return NULL;
-}
-
-Client *
-tiletop(Monitor *m)
-{
-	Client *c;
-	wl_list_for_each(c, &clients, link) {
 		if (VISIBLEON(c, m))
 			return c;
 	}
