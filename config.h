@@ -123,7 +123,7 @@ static const enum libinput_config_tap_button_map button_map = LIBINPUT_CONFIG_TA
 
 /* commands */
 static const char *termcmd[] = { "foot", NULL };
-static const char *menucmd[] = { "wmenu-run", "-b", "-i", "-f", "Mx437 IBM VGA 8x16 12", NULL };
+static const char *menucmd[] = { "wmenu-run", "-b", "-i", "-f", "Mx437 IBM VGA 8x16 12", "-d", "/usr/local/dmenubin", NULL };
 static const char *shutdown[] = { "loginctl", "poweroff", NULL };
 static const char *reboot[] = { "loginctl", "reboot", NULL };
 static const char *audiomute[] = { "wpctl", "set-mute", "@DEFAULT_SINK@", "toggle", NULL };
