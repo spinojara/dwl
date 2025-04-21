@@ -280,6 +280,21 @@ drwl_text(Drwl *drwl,
 	return x + (render ? w : 0);
 }
 
+static void
+drwl_fig(Drwl *drwl, int x, int y, int w, int h, int *fig, int invert) {
+	pixman_color_t clr;
+	if (!drwl || !drwl->scheme || !drwl->image)
+		return;
+
+	for (int i = y; i < y + h; i++) {
+		for (int j = x; j < x + w; j++) {
+			clr = convert_color(drwl->scheme[fig[(j - x) + w * (i - y)] ? ColFg : ColBg]);
+			pixman_image_fill_rectangles(PIXMAN_OP_SRC, drwl->image, &clr, 1,
+				&(pixman_rectangle16_t){j, i, 1, 1});
+		}
+	}
+}
+
 static unsigned int
 drwl_font_getwidth(Drwl *drwl, const char *text)
 {

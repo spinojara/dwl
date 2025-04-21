@@ -1,6 +1,7 @@
 /*
  * See LICENSE file for copyright and license details.
  */
+#include <pthread.h>
 #include <getopt.h>
 #include <libinput.h>
 #include <linux/input-event-codes.h>
@@ -306,6 +307,7 @@ static void destroypointerconstraint(struct wl_listener *listener, void *data);
 static void destroysessionlock(struct wl_listener *listener, void *data);
 static void destroykeyboardgroup(struct wl_listener *listener, void *data);
 static Monitor *dirtomon(enum wlr_direction dir);
+static void audio(const Arg *arg);
 static void backlight(const Arg *arg);
 static void kbd_backlight(const Arg *arg);
 static void drawbar(Monitor *m);
@@ -355,7 +357,10 @@ static void setmon(Client *c, Monitor *m, uint32_t newtags);
 static void setpsel(struct wl_listener *listener, void *data);
 static void setsel(struct wl_listener *listener, void *data);
 static void setup(void);
+static void refreshbar(struct wl_listener *listener, void *data);
+static void *barthreadroutine(void *data);
 static void spawn(const Arg *arg);
+static void spawnsync(const Arg *arg);
 static void startdrag(struct wl_listener *listener, void *data);
 //static int statusin(int fd, unsigned int mask, void *data);
 static void tag(const Arg *arg);
@@ -382,6 +387,7 @@ static void xytonode(double x, double y, struct wlr_surface **psurface,
 static void zoom(const Arg *arg);
 
 /* variables */
+static pthread_t barthread;
 static pid_t child_pid = -1;
 static int locked;
 static void *exclusive_focus;
@@ -438,6 +444,8 @@ static Monitor *selmon;
 static char stext[256];
 static struct wl_event_source *status_event_source;
 
+struct wl_signal refresh_bar_signal;
+
 static const struct wlr_buffer_impl buffer_impl = {
     .destroy = bufdestroy,
     .begin_data_ptr_access = bufdatabegin,
@@ -473,6 +481,7 @@ static struct wl_listener request_set_cursor_shape = {.notify = setcursorshape};
 static struct wl_listener request_start_drag = {.notify = requeststartdrag};
 static struct wl_listener start_drag = {.notify = startdrag};
 static struct wl_listener new_session_lock = {.notify = locksession};
+static struct wl_listener refresh_bar = {.notify = refreshbar};
 
 #ifdef XWAYLAND
 static void activatex11(struct wl_listener *listener, void *data);
@@ -1554,6 +1563,26 @@ dirtomon(enum wlr_direction dir)
 }
 
 void
+audio(const Arg *arg)
+{
+	Arg argv = { 0 };
+	switch (arg->i) {
+	case 0:
+		argv.v = audiomute;
+		break;
+	case 1:
+		argv.v = audiolower;
+		break;
+	case 2:
+		argv.v = audioraise;
+		break;
+	}
+	spawnsync(&argv);
+
+	drawbars();
+}
+
+void
 backlight(const Arg *arg) {
 	FILE *file;
 	char line[BUFSIZ], *endptr = NULL;
@@ -1576,6 +1605,8 @@ backlight(const Arg *arg) {
 
 	fprintf(file, "%lld\n", brightness);
 	fclose(file);
+
+	drawbars();
 }
 
 void
@@ -1602,9 +1633,368 @@ kbd_backlight(const Arg *arg) {
 }
 
 void
+drawclock(Monitor *m, int *x)
+{
+	int tw;
+	int figw = 14;
+
+	int fig[] = { 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+                        0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+                        0, 0, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 0, 0,
+                        0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0,
+                        0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0,
+                        1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1,
+                        1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1,
+                        1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1,
+                        1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1,
+                        0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 0,
+                        0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+                        0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+                        0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+                        0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0 };
+
+	time_t t = time(NULL);
+
+	struct tm *local = localtime(&t);
+
+	char str[64];
+	strftime(str, sizeof(str), "%F %H:%M", local);
+
+	tw = TEXTW(m, str) - m->lrpad + 2;
+
+	*x -= tw;
+	drwl_text(m->drw, *x, 0, tw, m->b.height, 0, str, 0);
+
+	*x -= figw + 2;
+	drwl_fig(m->drw, *x, 2, figw, figw, fig, 0);
+}
+
+void
+drawbattery(Monitor *m, int *x)
+{
+	int tw;
+	int figw = 14;
+
+	int fig[] =    { 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+			    0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+			    0, 0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0,
+			    0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0,
+			    0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0,
+			    1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1,
+			    1, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1,
+			    1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1,
+			    1, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 1,
+			    0, 1, 1, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0,
+			    0, 1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0,
+			    0, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0, 0,
+			    0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+			    0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0 };
+
+	int figcharge[] = { 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+			    0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+			    0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+			    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+			    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+			    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+			    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+			    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+			    1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+			    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+			    0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0,
+			    0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0,
+			    0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+			    0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0 };
+
+	int charging = 0;
+
+	unsigned long energy_now;
+	unsigned long energy_full;
+
+	FILE *file;
+	char line[BUFSIZ], *endptr, str[16];
+
+	file = fopen("/sys/class/power_supply/BAT0/energy_now", "r");
+	if (!file) {
+		goto errorbattery;
+	}
+	if (!fgets(line, sizeof(line), file)) {
+		fclose(file);
+		goto errorbattery;
+	}
+	fclose(file);
+	errno = 0;
+
+	energy_now = strtol(line, &endptr, 10);
+	if (errno ||(*endptr != '\n' && *endptr != '\0'))
+		goto errorbattery;
+
+	file = fopen("/sys/class/power_supply/BAT0/energy_full", "r");
+	if (!file)
+		goto errorbattery;
+	if (!fgets(line, sizeof(line), file)) {
+		fclose(file);
+		goto errorbattery;
+	}
+	fclose(file);
+
+	errno = 0;
+	energy_full = strtol(line, &endptr, 10);
+	if (errno ||(*endptr != '\n' && *endptr != '\0'))
+		goto errorbattery;
+
+	file = fopen("/sys/class/power_supply/AC0/online", "r");
+	if (!file)
+		goto errorbattery;
+	if (!fgets(line, sizeof(line), file)) {
+		fclose(file);
+		goto errorbattery;
+	}
+	fclose(file);
+
+	charging = !strcmp(line, "1\n");
+
+	sprintf(str, "%3lu%%", (100 * energy_now) / energy_full);
+	goto noerrorbattery;
+errorbattery:
+	sprintf(str, "???%%");
+noerrorbattery:
+
+	tw = TEXTW(m, str) - m->lrpad + 2;
+	*x -= tw;
+	drwl_text(m->drw, *x, 0, tw, m->b.height, 0, str, 0);
+	*x -= figw + 2;
+
+	drwl_fig(m->drw, *x, 2, figw, figw, charging ? figcharge : fig, 0);
+}
+
+void
+drawsound(Monitor *m, int *x) {
+	int tw;
+	int figw = 14;
+
+	FILE *file;
+	char line[BUFSIZ], *endptr, str[16];
+
+	double volume;
+
+	int mute = 0;
+
+	int figmute[] =	 { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			   0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0,
+			   0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+			   0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0,
+			   1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0,
+			   1, 1, 1, 1, 1, 0, 1, 0, 1, 0, 1, 0, 0, 1,
+			   1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+			   1, 1, 1, 1, 1, 0, 1, 1, 0, 0, 1, 0, 0, 1,
+			   1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 0, 0, 1,
+			   1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0,
+			   0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
+			   0, 0, 1, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+			   0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+			   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+	int fig[] =	 { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+			   0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+			   0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+			   0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
+			   1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0,
+			   1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1,
+			   1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+			   1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1,
+			   1, 1, 1, 1, 1, 0, 1, 0, 0, 0, 1, 0, 0, 1,
+			   1, 1, 1, 1, 1, 0, 0, 0, 0, 1, 0, 0, 1, 0,
+			   0, 0, 1, 1, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0,
+			   0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 1, 0, 0,
+			   0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 0,
+			   0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+	file = popen("wpctl get-volume @DEFAULT_SINK@", "r");
+	if (!file)
+		goto sounderror;
+
+	if (!fgets(line, sizeof(line), file)) {
+		pclose(file);
+		goto sounderror;
+	}
+
+	pclose(file);
+
+	errno = 0;
+	volume = strtod(line + 8, &endptr);
+	if (errno || (*endptr != ' ' && *endptr != '\n'))
+		goto sounderror;
+
+	mute = strstr(line, "[MUTED]") != NULL;
+
+	sprintf(str, "%3d%%", MIN((int)(100 * volume), 999));
+	goto soundnoerror;
+sounderror:
+	sprintf(str, "???%%");
+soundnoerror:
+	tw = TEXTW(m, str) - m->lrpad + 2;
+
+	*x -= tw;
+	drwl_text(m->drw, *x, 0, tw, m->b.height, 0, str, 0);
+
+	*x -= figw + 2;
+	drwl_fig(m->drw, *x, 2, figw, figw, mute ? figmute : fig, 0);
+}
+
+void
+drawram(Monitor *m, int *x) {
+	int tw;
+	int figw = 14;
+
+	int fig[] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                      0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+                      0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0,
+                      0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0,
+                      0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+                      0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0,
+                      0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0,
+                      0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0,
+                      0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0,
+                      0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+                      0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0,
+                      0, 1, 1, 0, 1, 1, 1, 1, 1, 1, 0, 1, 1, 0,
+                      0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0, 0, 0,
+                      0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+	long ramcurr, ramfull, *ramptr, j;
+	FILE *file;
+	char line[BUFSIZ], str[16];
+	char *ptr, *endptr;
+
+	file = fopen("/proc/meminfo", "r");
+	if (!file)
+		return;
+
+	for (int i = 0; i < 3; i++) {
+		if (!fgets(line, sizeof(line), file)) {
+			fclose(file);
+			goto errorram;
+		}
+		if (i == 1)
+			continue;
+
+		ptr = line + (i == 0 ? 9 : 13);
+
+		for (j = 0; j < 1000 && *ptr == ' '; j++, ptr++);
+		if (j == 1000) {
+			fclose(file);
+			goto errorram;
+		}
+
+		ramptr = i == 0 ? &ramfull : &ramcurr;
+
+		errno = 0;
+		*ramptr = strtol(ptr, &endptr, 10);
+		if (errno || *endptr != ' ') {
+			fclose(file);
+			goto errorram;
+		}
+	}
+
+	fclose(file);
+
+	ramcurr = ramfull - ramcurr;
+	if (ramfull < 0 || ramcurr < 0)
+		goto errorram;
+
+	sprintf(str, "%2.1lf/%2.1lf GiB", ramcurr / 1048576.0, ramfull / 1048576.0);
+	goto noerrorram;
+errorram:
+	sprintf(str, "\?\?\?/\?\?\? GiB");
+noerrorram:
+
+	tw = TEXTW(m, str) - m->lrpad + 2;
+	*x -= tw;
+	drwl_text(m->drw, *x, 0, tw, m->b.height, 0, str, 0);
+
+	*x -= figw + 2;
+	drwl_fig(m->drw, *x, 2, figw, figw, fig, 0);
+}
+
+void
+drawbacklight(Monitor *m, int *x) {
+	int tw;
+	int figw = 14;
+
+	int fig[] = { 0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0,
+			    0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+			    0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0,
+			    0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0,
+			    0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0,
+			    1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,
+			    1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,
+			    1, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,
+			    1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1,
+			    0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0,
+			    0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0,
+			    0, 0, 1, 1, 1, 0, 0, 1, 1, 1, 1, 1, 0, 0,
+			    0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0,
+			    0, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0 };
+
+	long brightness, maxbrightness;
+	FILE *file;
+	char line[BUFSIZ], str[16], *endptr;
+
+	file = fopen("/sys/class/backlight/amdgpu_bl0/brightness", "r");
+	if (!file)
+		goto errorbacklight;
+
+	if (!fgets(line, sizeof(line), file)) {
+		fclose(file);
+		goto errorbacklight;
+	}
+
+	fclose(file);
+
+	errno = 0;
+	brightness = strtol(line, &endptr, 10);
+	if (errno || *endptr != '\n')
+		goto errorbacklight;
+
+	file = fopen("/sys/class/backlight/amdgpu_bl0/max_brightness", "r");
+	if (!file)
+		goto errorbacklight;
+
+	if (!fgets(line, sizeof(line), file)) {
+		fclose(file);
+		goto errorbacklight;
+	}
+
+	fclose(file);
+
+	errno = 0;
+	maxbrightness = strtol(line, &endptr, 10);
+	if (errno || *endptr != '\n')
+		goto errorbacklight;
+
+	sprintf(str, "%3ld%%", (100 * brightness) / maxbrightness);
+	goto noerrorbacklight;
+errorbacklight:
+	sprintf(str, "???%%");
+noerrorbacklight:
+
+	tw = TEXTW(m, str) - m->lrpad + 2;
+	*x -= tw;
+	drwl_text(m->drw, *x, 0, tw, m->b.height, 0, str, 0);
+
+	*x -= figw + 2;
+	drwl_fig(m->drw, *x, 2, figw, figw, fig, 0);
+}
+
+void
+drawwifi(Monitor *m, int *x) {
+}
+
+void
 drawbar(Monitor *m)
 {
-	int x, w, tw = 0;
+	int wpad = 16;
+	int x, w;
 	int boxs = m->drw->font->height / 9;
 	int boxw = m->drw->font->height / 6 + 2;
 	uint32_t i, occ = 0, urg = 0;
@@ -1616,12 +2006,14 @@ drawbar(Monitor *m)
 	if (!(buf = bufmon(m)))
 		return;
 
+#if 0
 	/* draw status first so it can be overdrawn by tags later */
 	if (m == selmon) { /* status is only drawn on selected monitor */
 		drwl_setscheme(m->drw, colors[SchemeNorm]);
 		tw = TEXTW(m, stext) - m->lrpad + 2; /* 2px right padding */
 		drwl_text(m->drw, m->b.width - tw, 0, tw, m->b.height, 0, stext, 0);
 	}
+#endif
 
 	wl_list_for_each(c, &clients, link) {
 		if (c->mon != m)
@@ -1642,12 +2034,27 @@ drawbar(Monitor *m)
 				urg & 1 << i);
 		x += w;
 	}
+
+	x = m->b.width;
+	drawclock(m, &x);
+	x -= wpad;
+	drawbattery(m, &x);
+	x -= wpad;
+	drawram(m, &x);
+	x -= wpad;
+	drawbacklight(m, &x);
+	x -= wpad;
+	drawsound(m, &x);
+	x -= wpad;
+	drawwifi(m, &x);
+
 #if 0
 	w = TEXTW(m, m->ltsymbol);
 	drwl_setscheme(m->drw, colors[SchemeNorm]);
 	x = drwl_text(m->drw, x, 0, w, m->b.height, m->lrpad / 2, m->ltsymbol, 0);
 #endif
 
+#if 0
 	if ((w = m->b.width - tw - x) > m->b.height) {
 		if (c) {
 			drwl_setscheme(m->drw, colors[m == selmon ? SchemeSel : SchemeNorm]);
@@ -1659,6 +2066,7 @@ drawbar(Monitor *m)
 			drwl_rect(m->drw, x, 0, w, m->b.height, 1, 1);
 		}
 	}
+#endif
 
 	wlr_scene_buffer_set_dest_size(m->scene_buffer,
 		m->b.real_width, m->b.real_height);
@@ -2868,8 +3276,8 @@ setup(void)
 	wl_signal_add(&virtual_keyboard_mgr->events.new_virtual_keyboard,
 			&new_virtual_keyboard);
 	virtual_pointer_mgr = wlr_virtual_pointer_manager_v1_create(dpy);
-    wl_signal_add(&virtual_pointer_mgr->events.new_virtual_pointer,
-            &new_virtual_pointer);
+	wl_signal_add(&virtual_pointer_mgr->events.new_virtual_pointer,
+		&new_virtual_pointer);
 
 	seat = wlr_seat_create(dpy, "seat0");
 	wl_signal_add(&seat->events.request_set_cursor, &request_cursor);
@@ -2884,6 +3292,9 @@ setup(void)
 	output_mgr = wlr_output_manager_v1_create(dpy);
 	wl_signal_add(&output_mgr->events.apply, &output_mgr_apply);
 	wl_signal_add(&output_mgr->events.test, &output_mgr_test);
+
+	wl_signal_init(&refresh_bar_signal);
+	wl_signal_add(&refresh_bar_signal, &refresh_bar);
 
 	/* Make sure XWayland clients don't connect to the parent X server,
 	 * e.g when running in the x11 backend or the wayland backend and the
@@ -2903,6 +3314,34 @@ setup(void)
 		fprintf(stderr, "failed to setup XWayland X server, continuing without it\n");
 	}
 #endif
+	if (pthread_create(&barthread, NULL, &barthreadroutine, NULL))
+		die("thread");
+}
+
+void *
+barthreadroutine(void *data)
+{
+	while (1) {
+		while(sleep(1));
+		wl_signal_emit(&refresh_bar_signal, NULL);
+	}
+	return NULL;
+}
+
+static void
+refreshbar(struct wl_listener *listener, void *data)
+{
+#if 0
+	FILE *f = fopen("/tmp/bar", "a");
+
+	time_t t = time(NULL);
+	struct tm *tm = localtime(&t);
+	char str[64];
+	strftime(str, sizeof(str), "drawing bar: %T\n", tm);
+	fprintf(f, "%s", str);
+	fclose(f);
+#endif
+	drawbars();
 }
 
 void
@@ -2915,6 +3354,22 @@ spawn(const Arg *arg)
 		execvp(((char **)arg->v)[0], (char **)arg->v);
 		die("dwl: execvp %s failed:", ((char **)arg->v)[0]);
 	}
+}
+
+void
+spawnsync(const Arg *arg)
+{
+	pid_t pid;
+	if ((pid = fork()) == 0) {
+		close(STDIN_FILENO);
+		dup2(STDERR_FILENO, STDOUT_FILENO);
+		setsid();
+		execvp(((char **)arg->v)[0], (char **)arg->v);
+		die("dwl: execvp %s failed:", ((char **)arg->v)[0]);
+	}
+
+	if (pid > 0)
+		waitpid(pid, NULL, 0);
 }
 
 void
